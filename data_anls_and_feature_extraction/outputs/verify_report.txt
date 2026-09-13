@@ -1,0 +1,50 @@
+==========================================================================
+GATE REPORT - order-domain verification (H1 / H2)
+==========================================================================
+
+[H1] same fault, different sampling rate / speed -> order peaks aligned?
+       pair fault key_order  theo  order_12k  order_48k  rel_gap_12k_48k  dev_from_theory_12k  dev_from_theory_48k
+ B007_load0     B       BSF 2.357      2.406      2.472           0.0284               0.0208               0.0491
+ B007_load1     B       BSF 2.357      2.506      2.167           0.1437               0.0633               0.0804
+ B007_load2     B       BSF 2.357      2.197      2.542           0.1465               0.0678               0.0787
+IR007_load0    IR      BPFI 5.415      5.410      5.012           0.0735               0.0010               0.0745
+IR007_load1    IR      BPFI 5.415      5.418      5.418           0.0000               0.0005               0.0005
+IR007_load2    IR      BPFI 5.415      5.423      5.423           0.0000               0.0015               0.0015
+OR007_load0    OR      BPFO 3.585      3.607      3.607           0.0000               0.0061               0.0061
+OR007_load1    OR      BPFO 3.585      3.586      3.588           0.0005               0.0002               0.0008
+OR007_load2    OR      BPFO 3.585      3.633      3.566           0.0186               0.0134               0.0052
+  median rel gap per fault type:
+fault
+B     0.1437
+IR    0.0000
+OR    0.0005
+  pairs within 5%: 67%   overall median rel gap = 0.0186
+  H1 verdict: PASS   (verdict uses the median; BSF is the weakest order and is the main outlier)
+
+[H1b] same fault, different rotational speed (load variation)
+group order_key  rpm_low  rpm_high  order_low  order_high  theo  rel_gap
+ B007       BSF   1722.0    1796.0      2.439       2.406 2.357   0.0143
+ B014       BSF   1724.0    1796.0      2.367       2.205 2.357   0.0687
+ B021       BSF   1729.0    1796.0      2.430       2.406 2.357   0.0101
+ B028       BSF   1730.0    1797.0      2.428       2.404 2.357   0.0101
+IR007      BPFI   1721.0    1797.0      5.370       5.410 5.415   0.0074
+IR014      BPFI   1728.0    1796.0      5.417       5.413 5.415   0.0008
+IR021      BPFI   1728.0    1797.0      5.417       5.410 5.415   0.0014
+IR028      BPFI   1730.0    1797.0      5.689       5.343 5.415   0.0639
+OR007      BPFO   1724.0    1797.0      3.620       3.607 3.585   0.0038
+OR014      BPFO   1723.0    1796.0      3.413       3.341 3.585   0.0201
+OR021      BPFO   1718.0    1796.0      3.632       3.608 3.585   0.0066
+  median rel gap = 0.0101
+
+[H2] target rpm estimate stability
+  n=16  mean=578.44 rpm  std=5.774  rel_std=1.00%  methods={'hps': 15, 'prior': 1}
+  H2 verdict: PASS
+
+[note] order resolution = 1 / revolutions-in-window.
+  source 0.5 s @1800 rpm -> ~15 rev -> 0.067 order
+  target 0.5 s @ 600 rpm -> ~ 5 rev -> 0.200 order (coarser; +-3% of order
+  3.58 is +-0.107, i.e. about one bin - top-K peak features are more robust)
+
+[fallback if H1 fails] use time-domain dimensionless features + relative
+  band-energy ratios instead of pure order features.
+==========================================================================

@@ -1,0 +1,46 @@
+==========================================================================
+DATASET CARD - task 1 (data analysis & feature extraction)
+==========================================================================
+generated: 2026-09-13 16:56:01   elapsed: 1.7 s
+signal window: 0.128 s   feature window: 0.5 s
+overlap: 0.5   channel: DE   band mode: sk
+
+[source] windows=4120  files=161
+fault_type
+OR    1923
+B     1048
+IR    1037
+N      112
+
+[source] windows per group
+group
+12k_DE        1860
+12k_FE        1403
+48k_DE         745
+48k_Normal     112
+
+[target] windows=496  files=16
+
+[folds] file-level stratified split (same file never crosses folds)
+fold  n_files  n_B  n_IR  n_OR  n_N
+   0       33    8     8    16    1
+   1       33    8     8    16    1
+   2       32    8     8    15    1
+   3       32    8     8    15    1
+   4       31    8     8    15    0
+
+[column groups]
+  meta        : domain, file_id, group, fs, win_idx, win_start, rpm, fault_type, fault_size, or_position, load
+  time  (t_*) : dimensionless ones are directly comparable; the raw
+                dimensional ones (t_rms/t_std/t_var/t_peak/t_p2p/t_mean_abs)
+                are NOT comparable - use the per-file normalized *_rel columns
+  order (o_*) : TRANSFERABLE core features (speed/sampling-rate invariant)
+  order theo  : o_theo_* only exists for source (needs known bearing geometry)
+  freq  (f_*) : ABSOLUTE-frequency features, NOT transferable; source diagnosis only
+
+[how to use in task 2/3]
+  transferable = [c for c in cols if (c.startswith('t_') and c not in
+                  {'t_mean_abs','t_rms','t_std','t_var','t_peak','t_p2p'})
+                  or (c.startswith('o_') and not c.startswith('o_theo_'))]
+  never split random windows of one file across train/test: use splits.json
+==========================================================================

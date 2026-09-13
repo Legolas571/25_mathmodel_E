@@ -1,0 +1,519 @@
+================================================================================
+2025 年中国研究生数学建模竞赛 E 题
+高速列车轴承智能故障诊断问题 —— 技术路线方案
+================================================================================
+
+【说明】本文件中的数据规模、通道、长度、转速等数字，均来自对项目内 179 个
+.mat 文件的逐文件实测（读取变量名与数据长度），非照抄题目描述。
+
+
+================================================================================
+0. 核心结论（一句话）
+================================================================================
+本题不是"缺数据"的问题，而是"目标域缺标签、缺转速、缺轴承几何参数"的问题。
+因此技术路线的主轴应当是：
+
+    机理归一化（阶次域） + 无监督域适应（UDA） + 多视角一致性标定
+
+而不是简单堆一个更大的深度网络。
+
+分域判断：
+  - 源域 161 个文件、约 18 分钟信号，按截窗可生成 2 万~8 万个样本，
+    **不算典型小样本**。
+  - 目标域 16 段、每段 8 秒、**零标签**，每类约 4 段，
+    **是小样本，且严格说是"零标注"而非 few-shot**。
+  - 真正的瓶颈在目标域那一侧。
+
+
+================================================================================
+1. 数据实测情况（方案的事实基础）
+================================================================================
+1.1 源域（161 个文件）
+
+  目录                          文件数   单文件长度            备注
+  -------------------------------------------------------------------------
+  12kHz_DE_data                  60     96000 点（8 s @12k）   52 个含 DE/FE/BA/RPM，
+                                                              8 个仅含 DE 单变量
+  12kHz_FE_data                  45     96000 点（8 s @12k）   1 个为 121168 点
+  48kHz_DE_data                  52     192000 点（4 s @48k）   5 个长度非整
+                                                              （63788 / 124602 /
+                                                               128663 / 129969 /
+                                                               130549）
+  48kHz_Normal_data               4     384000 点（8 s @48k）   1 个为 243938 点
+
+  通道情况：12k 文件含 DE + FE + BA + RPM；48k 文件含 DE + FE + RPM（无 BA）。
+  总计：DE 通道约 2.11e7 点，合计约 18 分钟信号。
+
+1.2 源域类别分布（与题目一致，但极度不平衡）
+
+  类别                     文件数    占比
+  ------------------------------------------
+  外圈 OR 合计               77     47.8%
+      Orthogonal（3 点钟）    27
+      Centered（6 点钟）      30
+      Opposite（12 点钟）     20
+  内圈 IR                    40     24.8%
+  滚动体 B                   40     24.8%
+  正常 N                      4      2.5%   <-- 严重不平衡，且是最关键的类
+  ------------------------------------------
+  合计                      161
+
+  故障尺寸：OR 有 0.007 / 0.014 / 0.021 英寸三种；
+            IR 与 B 有 0.007 / 0.014 / 0.021 / 0.028 英寸四种。
+  载荷：0 / 1 / 2 / 3 马力。
+  转速：1718 ~ 1798 rpm（约 28.6 ~ 30 Hz），每个文件内基本恒定。
+
+1.3 目标域（16 个文件）
+
+  文件 A.mat ~ P.mat，每个文件仅一个变量（变量名即文件名）。
+  每段 256000 点 = 8 s @ 32 kHz；16 段合计 4096000 点 = 128 s。
+  列车速度约 90 km/h，轴承转速约 600 rpm（转频约 10 Hz）。
+  工作状态为 OR / IR / B / N 四类，**各段标签未知**。
+
+1.4 域差异一览（这是方案要解决的核心矛盾）
+
+  项目          源域                        目标域
+  ---------------------------------------------------------------------
+  采样频率      12 kHz / 48 kHz             32 kHz
+  转频          约 28.6 ~ 30 Hz             约 10 Hz（相差约 3 倍）
+  轴承型号      SKF6205（DE）/ SKF6203（FE） 列车轴箱轴承，几何未知
+  载荷          0 / 1 / 2 / 3 hp            固定运营工况
+  单段时长      8 s / 4 s                   8 s
+  标签          完备                        无
+  可用转速      文件内置 RPM                无（需自估计）
+
+1.5 截窗样本量估算（供参考）
+
+  窗长     重叠     源域样本数      目标域样本数
+  -------------------------------------------------
+  1024     0%       20503           4000
+  1024     50%      40999           7984
+  1024     75%      81945           15952
+  2048     0%       10173           2000
+  2048     50%      20342           3984
+  4096     0%       5059            992
+  4096     50%      10012           1984
+
+  重要提醒：同一文件切出的窗共享同一轴承、同一转速、同一载荷、同一故障尺寸，
+  彼此高度相关。**有效样本量应按"文件"计，而不是按"窗"计**。
+  窗口级数量"很大"是统计假象，不能作为"不是小样本"的理由。
+
+
+================================================================================
+2. 关键约束 → 方案要求（一一对应）
+================================================================================
+  事实                                     对方案的要求
+  ------------------------------------------------------------------------------
+  源域 12/48 kHz，目标域 32 kHz            不能直接喂原始波形，必须重采样或
+                                           做阶次域归一化
+  源域约 1800 rpm，目标域约 600 rpm        故障特征频率随转频线性平移，
+                                           绝对频率特征不可迁移 → 转成"阶次"
+  源域有 RPM，目标域无 RPM                 需无键相阶次跟踪（tacholess order
+                                           tracking）估计瞬时转速
+  源域轴承几何已知，目标域未知             特征阶次理论值不同，需从目标域包络谱
+                                           自估计 + 与源域典型范围比对
+  目标域 16 段、0 标签                     只能做无监督域适应 + 自训练；
+                                           不能做 few-shot（few-shot 需少量标注）
+  源域 N 类仅 4 个文件                     类不平衡处理必需，Focal Loss +
+                                           定向增强，主指标用 macro-F1
+  7 个文件长度非整                         切窗代码不能写死长度
+  窗口高度相关                             划分单位必须是"文件"，
+                                           测试/标定必须用非重叠窗
+
+
+================================================================================
+3. 总体技术路线（五层结构）
+================================================================================
+  第 0 层  数据治理
+     统一以 DE 通道为主；按"秒"而非"点"切窗；按文件划分训练/测试；统一变量读取
+
+  第 1 层  机理层
+     BPFO/BPFI/BSF/FTF 计算 → 谱峭度选共振带 → 包络解调 → 角域重采样（阶次域）
+
+  第 2 层  表征层
+     三视角特征：时域统计量 / 包络阶次谱 / 时频图（CWT-STFT）
+
+  第 3 层  源域诊断
+     WDCNN(1D) + 2D-CNN + 阶次谱-MLP 对比；Focal Loss 处理不平衡
+
+  第 4 层  迁移层
+     阶次域对齐（先抹平采样率+转速+载荷差异）
+     → 全局分布对齐（MK-MMD / CORAL）
+     → 类条件子域对齐（LMMD，迭代伪标签）
+     → 对抗域适应（DANN / CDAN，与上者对比或并联）
+     → 熵最小化 + 高置信伪标签自训练
+     → 物理正则（目标域包络阶次谱在故障特征阶次邻域的能量占比约束）
+
+  第 5 层  标定与解释
+     三视角共识投票 → A~P 标签 + 置信度 + 一致性
+     → 可解释性三层（事前 / 迁移过程 / 事后）
+
+  --------------------------------------------------------------------------
+  【本方案的灵魂】贯穿全局的一条主线：
+  用"阶次域"把采样率差异（12k/48k/32k）、转速差异（1800 vs 600 rpm）、
+  载荷差异（0~3 hp）一次性归一化掉，剩下的"轴承几何差异"交给网络学。
+  这一步同时解决三类域偏移，是全路线中性价比最高的设计。
+  --------------------------------------------------------------------------
+
+
+================================================================================
+4. 任务 1：数据分析与故障特征提取
+================================================================================
+4.1 源域筛选策略（要写清"为什么选这些"，不能随手挑）
+
+  子集            内容                                     用途
+  ----------------------------------------------------------------------------
+  S1「同位置」    12kHz_DE_data（60 文件，故障与传感器    与目标域"传感器靠近故障"
+                  同在驱动端）                             假设一致，作为主力
+  S2「跨位置」    12kHz_FE_data（45 文件，风扇端故障）    提供"传递路径差异"的域
+                  + S1                                     多样性，训练域不变性
+  S3「跨采样率」  48kHz_DE_data（52）+ 48kHz_Normal（4）  提供采样率域多样性，
+                                                           与目标域 32 kHz 最接近
+
+4.2 机理特征（必做，是全文的物理基础）
+  (1) 按表 1 参数与各文件 RPM，计算 BPFO / BPFI / BSF / FTF；
+  (2) 用包络解调（Hilbert + 平方包络谱）验证：源域信号在理论特征频率处是否
+      出现峰值 —— 这是"特征有效"的第一份证据，也是任务 4 事前可解释性的素材；
+  (3) 用谱峭度 / 快速峭度图自动选择共振频带后再做包络，替代人工选带。
+
+4.3 特征表征（三视角，便于后续消融）
+
+  视角        内容                                          方法出处
+  ----------------------------------------------------------------------------
+  时域        RMS、峭度、偏度、峰值因子、脉冲因子、        传统无量纲指标；
+              裕度因子、波形因子                           综述 Lei et al. 2020
+  频域/阶次域 重心频率、均方频率、频率方差；              Randall & Antoni 2011
+              包络阶次谱在特征阶次及谐波处的幅值与比值
+  时频域      STFT / CWT 时频图（转 2D 图像喂 CNN）；      张安安 等 2020（题目文献[2]）
+              VMD / EMD 分量能量                           VMD: Dragomiretskiy 2014
+                                                           EMD: Huang et al. 1998
+  循环平稳    谱相关 / 循环谱相干（对早期微弱故障最敏感）   Antoni 2007 (JSV)
+
+4.4 角域重采样（关键预处理）
+  - 源域：用文件自带 RPM 做计算阶次跟踪（COT）；
+  - 目标域：无键相阶次跟踪，从振动信号的时频脊线反演瞬时转速；
+  - 效果：重采样后所有域统一到"每转 N 点"，转速差异被彻底消除。
+
+4.5 切窗与防泄漏（最容易丢分的地方）
+  - 按"秒"切窗，不按"点"切：取 128 ms 窗（约 3 个 BPFO 冲击周期 @600 rpm），
+    源域 12 kHz → 1536 点，目标域 32 kHz → 4096 点；
+  - 训练集用 50% 重叠增广；测试 / 标定必须用非重叠窗；
+  - 划分单位是"文件"，严禁把同一文件的重叠窗随机分到训练与测试两侧；
+  - 类别不平衡：对 N 类做定向增强（时移、加噪、幅值扰动、提高重叠率），
+    保留 macro-F1 作为主指标。
+
+
+================================================================================
+5. 任务 2：源域故障诊断
+================================================================================
+5.1 划分设计（比选什么模型更重要）—— 三种划分回答三个问题
+  (1) 随机划分（按文件）：基础诊断能力上限；
+  (2) 留一载荷（Leave-One-Load-Out）：跨工况泛化能力；
+  (3) 留一采样率 / 留一故障尺寸：跨域泛化能力
+      —— 这一项直接为任务 3 选方法提供依据。
+
+5.2 模型候选（建议做 2~3 个对比，不要只做一个）
+
+  模型                              说明                        出处
+  ----------------------------------------------------------------------------
+  WDCNN（宽核 1D-CNN，原始信号）    抗噪强，振动诊断标准         Zhang et al. 2017
+                                    强基线                       (Sensors)
+  2D-CNN + CWT 时频图               与题目文献[2]呼应            张安安 等 2020
+  阶次谱向量 + MLP / 1D-CNN         参数量小，可解释性最强       本方案自建，
+                                                                机理来自 Randall 2011
+  注意力增强（ECA / 坐标注意力）    提精度；注意力图可用于        Wang et al. 2020
+                                    可解释                       郭敏 等 2024
+                                                                 （题目文献[6]）
+  类别不平衡处理                    Focal Loss + 类平衡采样      Lin et al. 2017
+
+5.3 评价内容
+  准确率、macro-F1、混淆矩阵；
+  加不同 SNR 高斯白噪声测抗噪（题目提示源域存在轻微噪声影响）；
+  特征 t-SNE 可视化。
+
+
+================================================================================
+6. 任务 3：迁移诊断（核心得分点）
+================================================================================
+6.1 总体思路
+  目标域零标签 → 可行路线是"无监督域适应（UDA）+ 自训练"，
+  同时用机理归一化降低域差异，最后用多视角共识给 A~P 定标签。
+
+6.2 迁移方法分层（由弱到强，逐级消融）
+
+  层级              方法                              出处
+  ----------------------------------------------------------------------------
+  L1 分布对齐      MMD / MK-MMD(DAN) / JMMD(JAN) /   Gretton 2012；Long 2015；
+                   JDA                               Long 2017；Long 2013
+  L2 二阶统计对齐  CORAL / Deep CORAL                Sun 2016；Sun & Saenko 2016
+  L3 对抗对齐      DANN（梯度反转）/ ADDA /          Ganin 2016；Tzeng 2017；
+                   CDAN（条件对抗）                  Long 2018
+  L4 子域原型对齐  DSAN（LMMD，按类对齐）、           Zhu 2021 (TNNLS)；
+                   原型网络思想                      Snell 2017
+  L5 自训练        熵最小化 + 高置信伪标签；         Grandvalet & Bengio 2005；
+                   SHOT（源无关）                    Liang 2020 (ICML)
+  备选-样本加权    TrAdaBoost 思路，相似源样本高权重 Dai 2007；Pan & Yang 2010
+  备选-生成增强    CycleGAN 源→目标风格迁移；        Zhu 2017；Shao 2019
+                   GAN 生成故障样本
+  备选-物理约束    物理信息网络 / 机理先验正则        Raissi 2019；
+                                                     Sadoughi & Hu 2019
+
+6.3 推荐的具体组合（主线方案）
+
+  输入：角域重采样后的 128 ms 窗（源域与目标域同构）
+    |
+    v
+  共享编码器：WDCNN 主干（可加 ECA 注意力）
+    |
+    +--- 分类头：源域监督（Focal Loss 处理 N 类不平衡）
+    +--- 域对齐：多核 MMD + CORAL（全局）
+    |            + LMMD（类条件，用伪标签迭代）
+    +--- 对抗分支：DANN 梯度反转 + CDAN 条件对抗（可与 MMD 并联或二选一）
+    +--- 机理分支：强制目标域包络阶次谱在故障特征阶次邻域的能量占比 >= 阈值
+    |
+    v
+  自训练：熵最小化 → 高置信伪标签 → 回到 LMMD 更新，迭代 3~5 轮
+    |
+    v
+  三视角（时域 CNN / 阶次谱 CNN / CWT-CNN）对 16 段独立预测
+    |
+    v
+  文件级投票 → 标签 + 置信度 + 一致性
+
+6.4 目标域 A~P 标签标定（题目明确要求"给出数据对应的标签"）
+
+  用三重交叉确认，而不是单一模型输出：
+  (1) 模型证据：三视角窗级概率 → 文件级多数投票；
+  (2) 结构证据：目标域 16 段特征聚类（KMeans / 谱聚类 + 轮廓系数），
+      看是否呈现 4 簇且与预测标签一致；
+  (3) 机理证据：每段信号的包络阶次谱中，峰值阶次是否落在
+      BPFO / BPFI / BSF / FTF 的合理区间
+      （外圈约 3~6 阶、内圈约 5~8 阶、滚动体约 2~5 阶、正常无明显阶次峰）；
+  (4) 三者一致 → 高置信；不一致 → 在报告中如实标注为低置信并说明依据。
+      这种"可靠性分级"本身就是论文的加分项。
+
+6.5 迁移结果可视化（题目硬性要求）
+  - 迁移前后特征 t-SNE / UMAP 对比图；
+  - 域间距离曲线：MMD 值、A-distance、Wasserstein 距离随训练变化；
+  - 混淆矩阵 + 聚类指标（轮廓系数、ARI / AMI / NMI）；
+  - 源域与目标域包络阶次谱叠图（最直观的机理层迁移证据）；
+  - 16 段预测标签 + 置信度 + 窗级一致性热力图。
+
+
+================================================================================
+7. 任务 4：可解释性（建议三层全做）
+================================================================================
+  层次        具体做法                                      方法出处
+  ----------------------------------------------------------------------------
+  事前        输入用物理特征（阶次谱/统计量）而非黑箱       Rudin 2019 (Nature MI)
+              原始波形 → 天然可解释；用稀疏表示或浅层
+              模型做对照
+  迁移过程    域判别器准确率曲线（趋近 0.5 即域不可分）      Pan & Yang 2010；
+              LMMD 各类对齐程度、源样本权重分布、          Wang & Deng 2018；
+              逐层 MMD 变化 → 回答"知识从哪一层、           Zhuang 2021
+              哪一类迁移过去"
+  事后        Grad-CAM / Score-CAM 定位判别性时频区域       Selvaraju 2017；
+              （检查高亮是否落在冲击间隔与共振带）；        Wang 2020 (Score-CAM)；
+              SHAP 特征重要性；Integrated Gradients；      Lundberg & Lee 2017；
+              第一层卷积核频率响应分析                      Sundararajan 2017
+
+  建议的收尾论证链条（任务 4 的答案骨架）：
+    缺陷冲击 → 包络解调 → 阶次谱峰值 → 网络注意力落在该阶次邻域
+    → 域对齐使源/目标阶次谱重合 → 输出类别
+  机理、特征、迁移、决策四段闭环，同时覆盖事前 / 过程 / 事后。
+
+
+================================================================================
+8. 评价体系：无标签目标域如何证明自己做对了
+================================================================================
+这是本题最大的方法论难点。建议"代理任务 + 内部指标 + 机理一致性 + 稳定性"
+四重证据：
+
+  (1) 代理任务（最重要）
+      在源域内部构造有真值的跨域任务：跨载荷、跨转速（1800→1720 rpm）、
+      跨采样率（12k <-> 48k）、跨传感器位置（DE <-> FE）。
+      用这些任务量化每种迁移方法的迁移能力，选出最优方法再用于目标域。
+      这样"方法有效"就有可验证的数字支撑，而不是空口。
+
+  (2) 内部指标
+      轮廓系数、ARI / AMI / NMI、聚类数与类别数一致性。
+
+  (3) 机理一致性
+      包络阶次谱峰值与理论故障阶次的匹配率。
+
+  (4) 稳定性
+      多种子、多方法、多窗长下的标签一致率（建议 > 90% 才判定可信）。
+
+
+================================================================================
+9. 消融实验矩阵（论文表格骨架）
+================================================================================
+  编号   配置                                          目的
+  ----------------------------------------------------------------------------
+  A0     源域训练 → 目标域直接测试（无迁移）            量化域差异有多大
+  A1     + 重采样统一                                  采样率差异的贡献
+  A2     + 阶次域归一化                                转速差异的贡献
+                                                        （预期提升最大）
+  A3     + 谱峭度选带包络                              机理增强的贡献
+  A4     + MMD / CORAL                                 全局对齐的贡献
+  A5     + LMMD 子域对齐                               类条件对齐的贡献
+  A6     + 对抗域适应                                  与 A4/A5 对比
+  A7     + 伪标签自训练                                目标域无监督信息的利用
+  A8     + 三视角共识                                  稳健性
+  A9     + 物理正则                                    机理约束的贡献
+
+
+================================================================================
+10. 风险与应对
+================================================================================
+  风险                                  应对
+  ----------------------------------------------------------------------------
+  目标域无转速 → 阶次跟踪误差大          多方法估计转速取中位数；同时保留
+                                         "不做阶次、用带通包络谱"作为对照
+  目标域轴承几何未知 → 理论阶次不确定    从目标域包络谱自搜索峰值阶次，与典型
+                                         列车轴承阶次范围比对，报告中说明不确定性
+  重叠窗造成数据泄漏 → 精度虚高          严格按文件划分 + 测试用非重叠窗 +
+                                         报 file-level 结果
+  N 类仅 4 个文件                        定向增强 + Focal Loss + macro-F1，
+                                         并讨论该类预测的可信度
+  目标域仅 16 段 → 结论偶然性大          多种子/多方法一致性检验；给出置信度
+                                         而不是只给标签
+
+
+================================================================================
+11. 方法出处汇总
+================================================================================
+11.1 数据集出处（题目要求标明）
+  - Case Western Reserve University Bearing Data Center
+    （源域即其子集；标准基准与陷阱分析见 Smith & Randall 2015 (MSSP)；
+      Hendriks et al. 2022 (MSSP)）
+
+11.2 信号处理与故障机理
+  - Randall & Antoni (2011). Rolling element bearing diagnostics - A tutorial.
+    Mechanical Systems and Signal Processing, 25(2), 485-520.  【本方案总纲】
+  - Antoni (2006). MSSP, 20(2), 282-307.  【谱峭度】
+  - Antoni & Randall (2006). MSSP, 20(2), 308-331.  【谱峭度应用】
+  - Antoni (2007). Fast computation of the kurtogram. MSSP, 21(1), 108-124.
+  - Antoni (2007). Cyclic spectral analysis of rolling-element bearing signals:
+    Facts and fictions. Journal of Sound and Vibration, 304(3-5), 497-529.
+  - Fyfe & Munck (1997). Analysis of computed order tracking. MSSP, 11(2), 187-205.
+  - Bonnardot et al. (2005). Use of the acceleration signal of a gearbox in order
+    to perform angular resampling. MSSP, 19(4), 766-785.
+  - Zhao, Lin, Xu, Lei (2013). Tacholess envelope order analysis and its
+    application to fault detection of rolling element bearings with varying
+    speeds. Sensors, 13(8), 10856-10875.
+  - Coats & Randall (2014). Single and multi-stage phase demodulation based
+    order-tracking. MSSP, 44, 86-117.
+  - Dragomiretskiy & Zosso (2014). Variational Mode Decomposition.
+    IEEE Trans. Signal Processing, 62(3), 531-544.
+  - Huang et al. (1998). The empirical mode decomposition and the Hilbert
+    spectrum. Proc. R. Soc. Lond. A, 454, 903-995.
+
+11.3 深度学习故障诊断
+  - Zhang, Peng, Li, Chen, Zhang (2017). A New Deep Learning Model for Fault
+    Diagnosis with Good Anti-Noise and Domain Adaptation Ability on Raw
+    Vibration Signals. Sensors, 17(2), 425.  【WDCNN】
+  - Lei, Yang, Jiang, Jia, Li, Nandi (2020). Applications of machine learning to
+    machine fault diagnosis: A review and roadmap. MSSP, 138, 106587.
+  - 张安安, 黄晋英, 冀树伟, 等 (2020). 基于卷积神经网络图像分类的轴承故障模式
+    识别. 振动与冲击, 39(4), 165-171.  【题目文献[2]】
+  - 郭敏, 陈鹏, 周超, 等 (2024). 基于坐标注意力关系网络的小样本轴承故障诊断.
+    四川大学学报(自然科学版), 61(4), 338-346.  【题目文献[6]】
+  - Wang, Wu, Zhu, et al. (2020). ECA-Net: Efficient Channel Attention for Deep
+    Convolutional Neural Networks. CVPR.
+  - Lin, Goyal, Girshick, He, Dollar (2017). Focal Loss for Dense Object
+    Detection. ICCV.
+
+11.4 迁移学习
+  - Pan & Yang (2010). A Survey on Transfer Learning. IEEE TKDE, 22(2), 1345-1359.
+  - Zhuang et al. (2021). A Comprehensive Survey on Transfer Learning.
+    Proceedings of the IEEE, 109(1), 43-76.
+  - Wang & Deng (2018). Deep Visual Domain Adaptation: A Survey.
+    Neurocomputing, 312, 135-153.
+  - Gretton et al. (2012). A Kernel Two-Sample Test. JMLR, 13, 723-773.  【MMD】
+  - Long, Wang, Ding, Sun, Yu (2013). Transfer Feature Learning with Joint
+    Distribution Adaptation. ICCV.  【JDA】
+  - Long, Cao, Wang, Jordan (2015). Learning Transferable Features with Deep
+    Adaptation Networks. ICML.  【DAN / MK-MMD】
+  - Long, Zhu, Wang, Jordan (2017). Deep Transfer Learning with Joint Adaptation
+    Networks. ICML.  【JAN / JMMD】
+  - Long, Cao, Wang, Jordan (2018). Conditional Adversarial Domain Adaptation.
+    NeurIPS.  【CDAN】
+  - Sun, Feng, Saenko (2016). Return of Frustratingly Easy Domain Adaptation.
+    AAAI.  【CORAL】
+  - Sun & Saenko (2016). Deep CORAL: Correlation Alignment for Deep Domain
+    Adaptation. ECCV Workshops.
+  - Ganin et al. (2016). Domain-Adversarial Training of Neural Networks.
+    JMLR, 17(59), 1-35.  【DANN】
+  - Tzeng, Hoffman, Saenko, Darrell (2017). Adversarial Discriminative Domain
+    Adaptation. CVPR.  【ADDA】
+  - Tzeng, Hoffman, Zhang, Saenko, Darrell (2014). Deep Domain Confusion:
+    Maximizing for Domain Invariance. arXiv:1412.3474.  【DDC】
+  - Zhu, Zhuang, Wang, et al. (2021). Deep Subdomain Adaptation Network for Image
+    Classification. IEEE TNNLS, 32(4), 1713-1722.  【DSAN / LMMD】
+  - Liang, Hu, Feng (2020). Do We Really Need to Access the Source Data? Source
+    Hypothesis Transfer for Unsupervised Domain Adaptation. ICML.  【SHOT】
+  - Grandvalet & Bengio (2005). Semi-supervised Learning by Entropy Minimization.
+    NeurIPS.
+  - Ben-David, Blitzer, Crammer, Kulesza, Pereira, Vaughan (2010). A theory of
+    learning from different domains. Machine Learning, 79, 151-175.
+  - Dai, Yang, Xue, Yu (2007). Boosting for Transfer Learning. ICML.  【TrAdaBoost】
+  - Shao, Wang, Yan (2019). Generative adversarial networks for data augmentation
+    in machine fault diagnosis. Computers in Industry, 106, 85-93.
+  - Zhu, Park, Isola, Efros (2017). Unpaired Image-to-Image Translation using
+    Cycle-Consistent Adversarial Networks. ICCV.  【CycleGAN】
+  - Snell, Swersky, Zemel (2017). Prototypical Networks for Few-shot Learning.
+    NeurIPS.  【ProtoNet】
+  - Finn, Abbeel, Levine (2017). Model-Agnostic Meta-Learning for Fast Adaptation
+    of Deep Networks. ICML.  【MAML】
+  - Sung et al. (2018). Learning to Compare: Relation Network for Few-Shot
+    Learning. CVPR.
+  - Vinyals et al. (2016). Matching Networks for One Shot Learning. NeurIPS.
+
+11.5 可解释性
+  - Selvaraju et al. (2017). Grad-CAM: Visual Explanations from Deep Networks via
+    Gradient-based Localization. ICCV.
+  - Wang et al. (2020). Score-CAM: Score-Weighted Visual Explanations for
+    Convolutional Neural Networks. CVPR Workshops.
+  - Lundberg & Lee (2017). A Unified Approach to Interpreting Model Predictions.
+    NeurIPS.  【SHAP】
+  - Ribeiro, Singh, Guestrin (2016). "Why Should I Trust You?": Explaining the
+    Predictions of Any Classifier. KDD.  【LIME】
+  - Sundararajan, Taly, Yan (2017). Axiomatic Attribution for Deep Networks.
+    ICML.  【Integrated Gradients】
+  - Rudin (2019). Stop explaining black box machine learning models for high
+    stakes decisions. Nature Machine Intelligence, 1, 206-215.
+  - van der Maaten & Hinton (2008). Visualizing Data using t-SNE. JMLR, 9,
+    2579-2605.
+  - McInnes, Healy, Melville (2018). UMAP: Uniform Manifold Approximation and
+    Projection. arXiv:1802.03426.
+  - Raissi, Perdikaris, Karniadakis (2019). Physics-informed neural networks.
+    Journal of Computational Physics, 378, 686-707.
+  - Sadoughi & Hu (2019). Physics-Based Convolutional Neural Network for Fault
+    Diagnosis of Rolling Element Bearings. IEEE Sensors Journal, 19(11),
+    4181-4192.
+
+
+================================================================================
+12. 建议先验证的关键假设（决定整条路线成败）
+================================================================================
+  H1  阶次域归一化是否真的能抹平 12 kHz / 48 kHz 与不同转速带来的差异？
+      → 验证方式：对源域同名不同采样率/转速的文件做包络阶次谱，看峰位是否对齐。
+
+  H2  无键相阶次跟踪在目标域（32 kHz、600 rpm、8 s）上能否稳定估计转速？
+      → 验证方式：先在源域"假装没有 RPM"，用信号估计转速，与文件自带 RPM 比对，
+        统计估计误差。误差可接受，才敢用于目标域。
+
+  H3  源域内"跨采样率 / 跨转速"代理任务上，哪种迁移方法最优？
+      → 验证方式：用 48k ↔ 12k 互迁、以及不同转速文件互迁，量化各方法提升幅度。
+
+  H4  目标域 16 段是否确实为"每段单一状态"（而非混有多个状态）？
+      → 验证方式：段内多窗预测一致性检验。若某段一致性很低，说明该假设不成立，
+        需要改成分段定标签。
+
+  以上 4 项均只读数据、只出图，不改动项目内的任何数据文件。
+
+
+================================================================================
+（完）
+================================================================================

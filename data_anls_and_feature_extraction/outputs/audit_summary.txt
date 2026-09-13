@@ -1,0 +1,78 @@
+======================================================================
+DATA AUDIT SUMMARY
+======================================================================
+source files: 161   target files: 16
+
+[1] class x group (source)
+group       12k_DE  12k_FE  48k_DE  48k_Normal
+fault_type                                    
+B               16      12      12           0
+IR              16      12      12           0
+N                0       0       0           4
+OR              28      21      28           0
+
+[2] class x sampling rate  <-- evidence of N-only-at-48k confounding
+fs_khz      12kHz  48kHz
+fault_type              
+B              28     12
+IR             28     12
+N               0      4
+OR             49     28
+
+[3] class x load
+load         0   1   2   3
+fault_type                
+B           10  10  10  10
+IR          10  10  10  10
+N            1   1   1   1
+OR          20  19  19  19
+
+[4] class x fault size
+fault_size  -  007  014  021  028
+fault_type                       
+B           0   12   12   12    4
+IR          0   12   12   12    4
+N           4    0    0    0    0
+OR          0   36   13   28    0
+
+[5] OR mounting position
+    3 o'clock (Orthogonal): 27
+    6 o'clock (Centered): 30
+    12 o'clock (Opposite): 20
+
+[6] rpm distribution (source)
+count     161.000000
+mean     1761.832298
+std        26.362672
+min      1718.000000
+25%      1746.000000
+50%      1770.000000
+75%      1796.000000
+max      1798.000000
+rpm source counts: {'var': 151, 'filename': 10}
+
+[7] channel completeness
+channels
+DE,FE,BA    97
+DE,FE       56
+DE           8
+
+[8] irregular-length files: 7
+    12kHz_FE_data/OR/Orthogonal/0014/OR014@3_1   n=121168   (10.0973 s)
+    48kHz_DE_data/IR/0014/IR014_0                n=63788    (1.3289 s)
+    48kHz_DE_data/OR/Opposite/0007/OR007@12_0    n=129969   (2.7077 s)
+    48kHz_DE_data/OR/Opposite/0021/OR021@12_0    n=130549   (2.7198 s)
+    48kHz_DE_data/OR/Orthogonal/0007/OR007@3_0   n=124602   (2.5959 s)
+    48kHz_DE_data/OR/Orthogonal/0021/OR021@3_0   n=128663   (2.6805 s)
+    48kHz_Normal_data/N_0                        n=243938   (5.082 s)
+
+[9] class imbalance
+    OR    77   47.8%
+    B     40   24.8%
+    IR    40   24.8%
+    N      4    2.5%
+    max/min ratio = 19.2
+
+[10] target
+    files: 16, points each: [np.int64(256000)], duration: 8.0 s @ 32000 Hz
+======================================================================

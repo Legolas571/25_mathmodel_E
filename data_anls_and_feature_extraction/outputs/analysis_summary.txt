@@ -1,0 +1,49 @@
+==========================================================================
+FEATURE ANALYSIS SUMMARY
+==========================================================================
+source windows 4120 | target windows 496 | features 49
+
+[top-10 by mutual information]
+    feature  mutual_info  fisher_ratio group
+o_pk0_order     0.777502      0.035822 order
+o_pk1_order     0.625457      0.053363 order
+o_pk2_order     0.615652      0.201460 order
+o_pk3_order     0.548216      0.144700 order
+o_pk4_order     0.505879      0.098466 order
+o_pk5_order     0.448564      0.028011 order
+o_pk6_order     0.412552      0.047332 order
+o_pk7_order     0.359580      0.022516 order
+    t_shape     0.277076      0.336228  time
+o_pk2_ratio     0.268153      0.042434 order
+
+[order vs time: mean |rho| with rpm]  (lower is better for transfer)
+group
+order    0.045826
+time     0.028570
+
+[top-10 most domain-invariant features (lowest KS)]
+       feature  ks_stat         ks_p  src_median  tgt_median
+     t_rms_rel 0.065113 6.532673e-02    1.000000    1.000000
+     t_std_rel 0.065113 6.532673e-02    1.000000    1.000000
+     t_var_rel 0.065113 6.532673e-02    1.000000    1.000000
+t_mean_abs_rel 0.078371 1.422438e-02    1.000000    1.000000
+     o_pk1_amp 0.108790 1.485449e-04    0.051282    0.044028
+      o_shaft1 0.109548 1.300890e-04    0.024249    0.021243
+     t_p2p_rel 0.118548 2.508729e-05    1.000000    1.000000
+    t_peak_rel 0.135323 8.233129e-07    1.000000    1.000000
+     o_pk0_amp 0.149435 3.262740e-08    0.089387    0.084231
+      o_shaft3 0.157565 4.386288e-09    0.010465    0.011611
+
+[top-10 most domain-shifted features (highest KS)]
+    feature  ks_stat          ks_p  src_median  tgt_median
+o_pk1_order 0.629210 1.034693e-149    2.430819   11.021933
+ o_kurtosis 0.644710 5.235117e-158   80.199309   24.366646
+    o_crest 0.674371 1.063299e-174   41.231302   13.065541
+o_pk3_ratio 0.694306 1.187906e-186   54.601089    6.924304
+o_pk4_ratio 0.714339 3.327165e-199   42.494260    6.230071
+o_bandfrac4 0.728129 3.530078e-208    0.212604    0.466975
+o_pk5_ratio 0.739532 5.866556e-216   33.431549    5.659124
+o_pk6_ratio 0.806629 3.211658e-266   27.616563    5.114969
+o_pk7_ratio 0.819597 4.980071e-277   23.508498    4.696345
+o_bandfrac2 0.864565 1.251745e-318    0.285929    0.083719
+==========================================================================
