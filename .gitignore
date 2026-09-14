@@ -10,6 +10,12 @@ venv/
 # ---- 派生的中间缓存（可由 run.py 重新生成）----
 data_anls_and_feature_extraction/outputs/cache/
 
+# ---- 可再生的中间产物（体积大，可由脚本重新生成）----
+# run.py --save-windows 生成的分段信号窗口
+data_anls_and_feature_extraction/outputs/windows_*.npz
+# noise_robustness.py 生成的各种信噪比下的噪声特征表
+source_domain_fault_diagnosis/results/noisy_features_snr*.csv
+
 # ---- 编辑器 / 系统 ----
 .vscode/
 .idea/

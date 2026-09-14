@@ -1,7 +1,7 @@
 ==========================================================================
 DATASET CARD - task 1 (data analysis & feature extraction)
 ==========================================================================
-generated: 2026-09-14 09:26:14   elapsed: 1.7 s
+generated: 2026-09-14 10:52:13   elapsed: 8.3 s
 signal window: 0.128 s   feature window: 0.5 s
 overlap: 0.5   channel: DE   band mode: sk
 

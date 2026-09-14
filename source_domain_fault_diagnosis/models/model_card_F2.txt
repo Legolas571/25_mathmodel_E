@@ -1,0 +1,6 @@
+model      : hgb
+feature set: F2 (49 columns)
+classes    : ['B', 'IR', 'OR', 'N']
+train data : all 161 source files, 4120 windows
+scaler     : robust
+note       : only F2/F4 columns exist in features_target.csv, so this artifact is the one task 3 can apply to the target domain

@@ -223,7 +223,7 @@ def main(argv=None):
     fold_tbl = _fold_table(files, splits)
 
     if args.save_windows:
-        _save_windows(src_recs, args)
+        _save_windows(src_recs, tgt_recs, args)
     if args.save_timefreq:
         _save_timefreq(src_recs, tgt_recs, args)
 
@@ -234,18 +234,33 @@ def main(argv=None):
     return src, tgt
 
 
-def _save_windows(recs, args):
-    for tag, rlist in (("source", recs),):
-        arrs = []
+def _save_windows(src_recs, tgt_recs, args):
+    for tag, rlist in (("source", src_recs), ("target", tgt_recs)):
+        arrs, ids, fss, labels, groups = [], [], [], [], []
         for rec in tqdm(rlist, desc=f"windows-{tag}", ncols=90, file=sys.stdout):
-            x, fs, _ = dl.load_signal(rec, channel=args.channel)
+            try:
+                x, fs, _ = dl.load_signal(rec, channel=args.channel)
+            except Exception:
+                continue
             W, _ = pp.segment(x, fs, args.win_sec_signal, args.overlap)
-            if W.shape[0]:
-                arrs.append(W.astype(np.float32))
+            if W.shape[0] == 0:
+                continue
+            arrs.append(W.astype(np.float32))
+            ids.append(rec["file_id"])
+            fss.append(fs)
+            labels.append(rec.get("fault_type") or "")
+            groups.append(rec["group"])
         if arrs:
-            np.savez_compressed(C.OUT_DIR / f"windows_{tag}_signal.npz",
-                                **{f"w{i}": a for i, a in enumerate(arrs)})
-            print(f"  saved windows_{tag}_signal.npz ({len(arrs)} files)")
+            np.savez_compressed(
+                C.OUT_DIR / f"windows_{tag}_signal.npz",
+                **{f"w{i}": a for i, a in enumerate(arrs)},
+                file_ids=np.array(ids), fs=np.array(fss, dtype=np.int64),
+                labels=np.array(labels), groups=np.array(groups),
+                n_windows=np.array([a.shape[0] for a in arrs], dtype=np.int64),
+                win_sec=np.array([args.win_sec_signal]), overlap=np.array([args.overlap]))
+            n_tot = int(sum(a.shape[0] for a in arrs))
+            print(f"  saved windows_{tag}_signal.npz: {len(arrs)} files, {n_tot} windows, "
+                  f"{sum(a.nbytes for a in arrs)/1e6:.1f} MB raw")
 
 
 def _save_timefreq(src_recs, tgt_recs, args):
