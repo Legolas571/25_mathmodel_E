@@ -66,6 +66,8 @@ def main():
     picks = []
     for cls in C.CLASSES:
         c = next((r for r in src if r["fault_type"] == cls and r["group"] == "12k_DE"), None)
+        if c is None:
+            c = next((r for r in src if r["fault_type"] == cls), None)
         if c is not None:
             picks.append(c)
 

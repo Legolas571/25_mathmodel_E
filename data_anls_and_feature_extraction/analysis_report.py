@@ -42,7 +42,7 @@ def plot_separability(src, cols):
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    show = [c for c in ["t_kurtosis", "t_crest", "t_rms", "o_entropy", "o_crest",
+    show = [c for c in ["t_kurtosis", "t_crest", "t_rms_rel", "o_entropy", "o_crest",
                         "o_shaft1", "o_bandfrac2", "o_pk0_order"] if c in cols]
     if not show:
         return

@@ -28,6 +28,12 @@ def main(argv=None):
     t0 = time.time()
     log = []
 
+    stale = sorted(C.FIG_DIR.glob("*.png"))
+    for p in stale:
+        p.unlink()
+    if stale:
+        print(f"[run] cleared {len(stale)} stale figure(s) from figures/")
+
     import data_audit
     import bearing_kinematics
     import features_freq
